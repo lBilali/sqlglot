@@ -5573,10 +5573,10 @@ class Parser(metaclass=_Parser):
 
         return self.expression(exp.Interval, this=this, unit=unit)
 
-    def _parse_interval(self, match_interval: bool = True) -> t.Optional[exp.Add | exp.Interval]:
+    def _parse_interval(self, require_interval: bool = True) -> t.Optional[exp.Add | exp.Interval]:
         index = self._index
 
-        if not self._match(TokenType.INTERVAL) and match_interval:
+        if not self._match(TokenType.INTERVAL) and require_interval:
             return None
 
         if self._match(TokenType.STRING, advance=False):
@@ -5601,9 +5601,7 @@ class Parser(metaclass=_Parser):
 
         # Convert INTERVAL 'val_1' unit_1 [+] ... [+] 'val_n' unit_n into a sum of intervals
         if self._match_set((TokenType.STRING, TokenType.NUMBER), advance=False):
-            return self.expression(
-                exp.Add, this=interval, expression=self._parse_interval(match_interval=False)
-            )
+            return self.expression(exp.Add, this=interval, expression=self._parse_interval(False))
 
         self._retreat(index)
         return interval
@@ -5696,8 +5694,7 @@ class Parser(metaclass=_Parser):
     def _parse_type(
         self, parse_interval: bool = True, fallback_to_identifier: bool = False
     ) -> t.Optional[exp.Expression]:
-        interval = parse_interval and self._parse_interval()
-        if interval:
+        if interval := parse_interval and self._parse_interval():
             return self._parse_column_ops(interval)
 
         index = self._index
@@ -5785,9 +5782,7 @@ class Parser(metaclass=_Parser):
         self, check_func: bool = False, schema: bool = False, allow_identifiers: bool = True
     ) -> t.Optional[exp.Expression]:
         index = self._index
-
         this: t.Optional[exp.Expression] = None
-        prefix = self._match_text_seq("SYSUDTLIB", ".")
 
         if self._match_set(self.TYPE_TOKENS):
             type_token = self._prev.token_type
@@ -5838,7 +5833,6 @@ class Parser(metaclass=_Parser):
                 this=exp.DataType.Type.MAP,
                 expressions=[key_type, value_type],
                 nested=True,
-                prefix=prefix,
             )
 
         nested = type_token in self.NESTED_TYPE_TOKENS
@@ -5969,7 +5963,6 @@ class Parser(metaclass=_Parser):
                 this=exp.DataType.Type[type_token.name],
                 expressions=expressions,
                 nested=nested,
-                prefix=prefix,
             )
 
             # Empty arrays/structs are allowed
@@ -6161,11 +6154,17 @@ class Parser(metaclass=_Parser):
     def _parse_column_ops(self, this: t.Optional[exp.Expression]) -> t.Optional[exp.Expression]:
         this = self._parse_bracket(this)
 
-        while self._match_set(self.COLUMN_OPERATORS):
-            op_token = self._prev.token_type
-            op = self.COLUMN_OPERATORS.get(op_token)
+        column_operators = self.COLUMN_OPERATORS
+        cast_column_operators = self.CAST_COLUMN_OPERATORS
+        while self._curr:
+            op_token = self._curr.token_type
 
-            if op_token in self.CAST_COLUMN_OPERATORS:
+            if op_token not in column_operators:
+                break
+            op = column_operators[op_token]
+            self._advance()
+
+            if op_token in cast_column_operators:
                 field = self._parse_dcolon()
                 if not field:
                     self.raise_error("Expected type")
@@ -8732,10 +8731,7 @@ class Parser(metaclass=_Parser):
         return None
 
     def _match(self, token_type, advance=True, expression=None):
-        if not self._curr:
-            return None
-
-        if self._curr.token_type == token_type:
+        if self._curr and self._curr.token_type == token_type:
             if advance:
                 self._advance()
             self._add_comments(expression)
@@ -8744,10 +8740,7 @@ class Parser(metaclass=_Parser):
         return None
 
     def _match_set(self, types, advance=True):
-        if not self._curr:
-            return None
-
-        if self._curr.token_type in types:
+        if self._curr and self._curr.token_type in types:
             if advance:
                 self._advance()
             return True
@@ -8755,10 +8748,12 @@ class Parser(metaclass=_Parser):
         return None
 
     def _match_pair(self, token_type_a, token_type_b, advance=True):
-        if not self._curr or not self._next:
-            return None
-
-        if self._curr.token_type == token_type_a and self._next.token_type == token_type_b:
+        if (
+            self._curr
+            and self._next
+            and self._curr.token_type == token_type_a
+            and self._next.token_type == token_type_b
+        ):
             if advance:
                 self._advance(2)
             return True

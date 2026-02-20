@@ -4717,7 +4717,6 @@ class DataType(Expression):
         "expressions": False,
         "nested": False,
         "values": False,
-        "prefix": False,
         "kind": False,
         "nullable": False,
     }
